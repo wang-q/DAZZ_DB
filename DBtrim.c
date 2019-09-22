@@ -1,21 +1,11 @@
 /*******************************************************************************************
  *
- *  Split a .db into a set of sub-database blocks for use by the Dazzler:
- *     Divide the database <path>.db conceptually into a series of blocks referable to on the
- *     command line as <path>.1.db, <path>.2.db, ...  If the -x option is set then all reads
- *     less than the given length are ignored, and if the -a option is not set then secondary
- *     reads from a given well are also ignored.  The remaining reads are split amongst the
- *     blocks so that each block is of size -s * 1Mbp except for the last which necessarily
- *     contains a smaller residual.  The default value for -s is 400Mbp because blocks of this
- *     size can be compared by our "overlapper" dalign in roughly 16Gb of memory.  The blocks
- *     are very space efficient in that their sub-index of the master .idx is computed on the
- *     fly when loaded, and the .bps file of base pairs is shared with the master DB.  Any
- *     tracks associated with the DB are also computed on the fly when loading a database block.
+ *  Reset the trimming parameters for a .db:
+ *     Rewrite the .db or .dam file with the new thresholds and the new read counts for
+ *     each trimmed block.
  *
  *  Author:  Gene Myers
- *  Date  :  September 2013
- *  Mod   :  New splitting definition to support incrementality, and new stub file format
- *  Date  :  April 2014
+ *  Date  :  September 2017
  *
  ********************************************************************************************/
 
@@ -32,7 +22,7 @@
 #define PATHSEP "/"
 #endif
 
-static char *Usage = "[-aflm] [-x<int>] [-s<double(200.)>] <path:db|dam>";
+static char *Usage = "[-aflm] [-x<int>] <path:db|dam>";
 
 static DAZZ_READ *reads;
 
@@ -47,6 +37,7 @@ int main(int argc, char *argv[])
   int64      dbpos;
   FILE      *dbfile, *ixfile;
   char      *dbfile_name, *ixfile_name;
+  int        nblocks;
   int        status;
   int        nreads;
 
@@ -56,19 +47,16 @@ int main(int argc, char *argv[])
   int        FORCE;
   int        ALL;
   int        CUTOFF;
-  int64      SIZE;
   int        SELECT;
 
   { int   i, j, k;
     int   flags[128];
     char *eptr;
-    float size;
 
-    ARG_INIT("DBsplit")
+    ARG_INIT("DBtrim")
 
     SELECT = -1;
     CUTOFF = 0;
-    size   = 200;
 
     j = 1;
     for (i = 1; i < argc; i++)
@@ -80,19 +68,11 @@ int main(int argc, char *argv[])
           case 'x':
             ARG_NON_NEGATIVE(CUTOFF,"Min read length cutoff")
             break;
-          case 's':
-            ARG_REAL(size)
-            if (size <= 0.)
-              { fprintf(stderr,"%s: Block size must be a positive number\n",Prog_Name);
-                exit (1);
-              }
-            break;
         }
       else
         argv[j++] = argv[i];
     argc = j;
 
-    SIZE  = size*1000000ll;
     ALL   = flags['a'];
     FORCE = flags['f'];
 
@@ -109,10 +89,9 @@ int main(int argc, char *argv[])
     if (argc != 2)
       { fprintf(stderr,"Usage: %s %s\n",Prog_Name,Usage);
         fprintf(stderr,"\n");
-        fprintf(stderr,"      -s: Target size of blocks (in Mbp).\n");
         fprintf(stderr,"      -x: Trimmed DB has reads >= this threshold.\n");
         fprintf(stderr,"      -a: Trimmed DB contains all reads from a well (not just longest).\n");
-        fprintf(stderr,"      -f: Force the split to occur even if already split.\n");
+        fprintf(stderr,"      -f: Force the new trim setting even if already set.\n");
         fprintf(stderr,"\n");
         fprintf(stderr,"      -l: Set primary read for a well to be the longest.\n");
         fprintf(stderr,"      -m: Set primary read for a well to be the median.\n");
@@ -135,9 +114,11 @@ int main(int argc, char *argv[])
   { char    *pwd, *root;
     char     buffer[2*MAX_NAME+100];
     int      nfiles;
+    int      all, cutoff;
+    int64    size;
     int      i;
 
-    pwd    = PathTo(argv[1]);
+    pwd  = PathTo(argv[1]);
     if (status)
       { root   = Root(argv[1],".dam");
         dbfile_name = Strdup(Catenate(pwd,"/",root,".dam"),"Allocating db file name");
@@ -160,25 +141,33 @@ int main(int argc, char *argv[])
 
     FFREAD(&dbs,sizeof(DAZZ_DB),1,ixfile)
 
-    if (dbs.cutoff >= 0 && !FORCE)
-      { printf("You are about to overwrite the current partition settings.  This\n");
-        printf("will invalidate any tracks, overlaps, and other derivative files.\n");
-        printf("Are you sure you want to proceed? [Y/N] ");
-        fflush(stdout);
-        fgets(buffer,100,stdin);
-        if (index(buffer,'n') != NULL || index(buffer,'N') != NULL)
-          { printf("Aborted\n");
+    if (dbs.cutoff >= 0)
+      { if (!FORCE)
+          { printf("You are about to reset the thresholds for the trimmed DB.\n");
+            printf("This will invalidate any .las files produced by daligner\n");
+            printf("Are you sure you want to proceed? [Y/N] ");
             fflush(stdout);
-            fclose(dbfile);
-            fclose(ixfile);
-            exit (1);
+            fgets(buffer,100,stdin);
+            if (index(buffer,'n') != NULL || index(buffer,'N') != NULL)
+              { printf("Aborted\n");
+                fflush(stdout);
+                fclose(ixfile);
+                fclose(dbfile);
+                exit (1);
+              }
           }
       }
+    else
+      { fprintf(stderr,"%s: DB has not yet been split, use DBsplit\n",Prog_Name);
+        exit (1);
+      }
+
+    FSCANF(dbfile,DB_NBLOCK,&nblocks)
 
     FTELLO(dbpos,dbfile)
+    FSCANF(dbfile,DB_PARAMS,&size,&cutoff,&all)
     FSEEKO(dbfile,dbpos,SEEK_SET)
-    FPRINTF(dbfile,DB_NBLOCK,0)
-    FPRINTF(dbfile,DB_PARAMS,SIZE,CUTOFF,ALL)
+    FPRINTF(dbfile,DB_PARAMS,size,CUTOFF,ALL)
   }
 
   if (SELECT >= 0)
@@ -192,12 +181,12 @@ int main(int argc, char *argv[])
           reads[i].flags &= off;
           while ((reads[j].flags & DB_CSS) != 0)
             reads[j++].flags &= off;
-  
+
           if (j-i <= 1)
             { reads[i].flags |= DB_BEST;
               continue;
             }
-  
+
           if (SELECT == 0)
             { int mlen;
 
@@ -219,72 +208,45 @@ int main(int argc, char *argv[])
               h = msort[(j-i)/2];
             }
           reads[h].flags |= DB_BEST;
-        } 
+        }
     }
 
+  { DAZZ_READ *reads  = db.reads;
+    int        uread, tread;
+    int        rlen;
+    int        b, u, t;
 
-  { int64      totlen;
-    int        nblock, ireads, treads, rlen, fno;
-    int        i, upos, css;
+    u = 0;
+    t = 0;
+    fprintf(dbfile,DB_BDATA,0,0);
+    for (b = 0; b < nblocks; b++)
+      { FTELLO(dbpos,dbfile);
+        FSCANF(dbfile,DB_BDATA,&uread,&tread)
 
-    css    = 0;
-    nblock = 0;
-    totlen = 0;
-    ireads = 0;
-    treads = 0;
-    FPRINTF(dbfile,DB_BDATA,0,0)
-    if (ALL)
-      for (i = 0; i < nreads; i++)
-        { rlen = reads[i].rlen;
-          if ((reads[i].flags & DB_CSS) == 0)
-            css = 0;
-          if (rlen >= CUTOFF)
-            { if (css == 0 && totlen >= SIZE)
-                { FPRINTF(dbfile,DB_BDATA,i,treads)
-                  totlen = 0;
-                  ireads = 0;
-                  nblock += 1;
-                }
-              ireads += 1;
-              treads += 1;
-              totlen += rlen;
-              css = 1;
+        if (ALL)
+          while (u < uread)
+            { rlen = reads[u++].rlen;
+              if (rlen >= CUTOFF)
+                t += 1;
             }
-        }
-    else
-      for (i = 0; i < nreads; i++)
-        { rlen = reads[i].rlen;
-          if (rlen >= CUTOFF && (reads[i].flags & DB_BEST) != 0)
-            { ireads += 1;
-              treads += 1;
-              totlen += rlen;
-              if (totlen >= SIZE)
-                { FPRINTF(dbfile,DB_BDATA,i+1,treads)
-                  totlen = 0;
-                  ireads = 0;
-                  nblock += 1;
-                }
+        else
+          while (u < uread)
+            { rlen = reads[u].rlen;
+              if (rlen >= CUTOFF && (reads[u].flags & DB_BEST) != 0)
+                t += 1;
+              u += 1;
             }
-        }
 
-    if (ireads > 0)
-      { FPRINTF(dbfile,DB_BDATA,nreads,treads)
-        nblock += 1;
+        FSEEKO(dbfile,dbpos,SEEK_SET)
+        FPRINTF(dbfile,DB_BDATA,uread,t)
       }
-    fno = fileno(dbfile);
-    FTELLO(upos,dbfile)
-    if (ftruncate(fno,upos) < 0)
-      SYSTEM_WRITE_ERROR
-
-    FSEEKO(dbfile,dbpos,SEEK_SET)
-    FPRINTF(dbfile,DB_NBLOCK,nblock)
 
     dbs.cutoff = CUTOFF;
     if (ALL)
       dbs.allarr |= DB_ALL;
     else
       dbs.allarr &= ~DB_ALL;
-    dbs.treads = treads;
+    dbs.treads = t;
     FSEEKO(ixfile,0,SEEK_SET)
     FFWRITE(&dbs,sizeof(DAZZ_DB),1,ixfile)
     if (SELECT >= 0)

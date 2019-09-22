@@ -98,8 +98,8 @@ int main(int argc, char *argv[])
   FILE      *arrow, *indx;
   int64      boff;
 
-  HITS_DB    db;
-  HITS_READ *reads;
+  DAZZ_DB    db;
+  DAZZ_READ *reads;
   int        nfiles;
 
   int        VERBOSE;
@@ -145,6 +145,9 @@ int main(int argc, char *argv[])
     if ( (INFILE == NULL && ! PIPE && argc <= 2) || 
         ((INFILE != NULL || PIPE) && argc != 2))
       { fprintf(stderr,"Usage: %s %s\n",Prog_Name,Usage);
+        fprintf(stderr,"      -f: import files listed 1/line in given file.\n");
+        fprintf(stderr,"      -i: import data from stdin.\n");
+        fprintf(stderr,"        : otherwise, import sequence of specified files.\n");
         exit (1);
       }
   }
@@ -165,15 +168,15 @@ int main(int argc, char *argv[])
   indx  = Fopen(Catenate(pwd,PATHSEP,root,".idx"),"r+");
   if (indx == NULL)
     exit (1);
-  if (fread(&db,sizeof(HITS_DB),1,indx) != 1)
+  if (fread(&db,sizeof(DAZZ_DB),1,indx) != 1)
     { fprintf(stderr,"%s: %s.idx is corrupted, read failed\n",Prog_Name,root);
       exit (1);
     }
 
-  reads = (HITS_READ *) Malloc(sizeof(HITS_READ)*db.ureads,"Allocating DB index");
+  reads = (DAZZ_READ *) Malloc(sizeof(DAZZ_READ)*db.ureads,"Allocating DB index");
   if (reads == NULL)
     exit (1);
-  if (fread(reads,sizeof(HITS_READ),db.ureads,indx) != (size_t) (db.ureads))
+  if (fread(reads,sizeof(DAZZ_READ),db.ureads,indx) != (size_t) (db.ureads))
     { fprintf(stderr,"%s: %s.idx is corrupted, read failed\n",Prog_Name,root);
       exit (1);
     }
@@ -222,6 +225,7 @@ int main(int argc, char *argv[])
           goto error;
       }
 
+    eof = 0;
     for (cell = 0; cell < nfiles; cell++)
       { char  prolog[MAX_NAME], fname[MAX_NAME];
 
@@ -495,8 +499,8 @@ int main(int argc, char *argv[])
 
   db.allarr |= DB_ARROW;
   rewind(indx);
-  fwrite(&db,sizeof(HITS_DB),1,indx);
-  fwrite(reads,sizeof(HITS_READ),db.ureads,indx);
+  fwrite(&db,sizeof(DAZZ_DB),1,indx);
+  fwrite(reads,sizeof(DAZZ_READ),db.ureads,indx);
 
   fclose(istub);
   fclose(indx);

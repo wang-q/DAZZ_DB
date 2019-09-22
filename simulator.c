@@ -41,6 +41,8 @@
 #include <unistd.h>
 #include <math.h>
 
+#define PACBIO
+
 #include "DB.h"
 
 static char *Usage[] = { "<genome:dam> [-CU] [-m<int(10000)>]  [-s<int(2000)>] [-e<double(.15)>]",
@@ -61,9 +63,25 @@ static int    HASR;       // -r option is set?
 static int    SEED;       // -r option
 static FILE  *MAP;        // -M option
 
-#define INS_RATE  .73333  // insert rate
+#ifdef PACBIO
+
+#define INS_RATE  .73333  // insert rate (for PB data)
 #define DEL_RATE  .20000  // deletion rate
 #define IDL_RATE  .93333  // insert + delete rate
+
+#elif ILLUMINA
+
+#define INS_RATE  .1  // insert rate (for Illumina data)
+#define DEL_RATE  .1  // deletion rate
+#define IDL_RATE  .2  // insert + delete rate
+
+#else
+
+#define INS_RATE  .33333  // insert rate (equal weighting)
+#define DEL_RATE  .33333  // deletion rate
+#define IDL_RATE  .66666  // insert + delete rate
+
+#endif
 
 //  Complement (in the DNA sense) string *s*.
 
@@ -171,10 +189,11 @@ static double sample_unorm(double x)
 //    consists of its contigs with a random sequence filling the gaps (generated according to
 //    the bp frequency in db.freq[4]).
 
-HITS_DB *load_and_fill(char *name, int *pscaffs)
-{ static HITS_DB db;
-  HITS_READ *reads;
+DAZZ_DB *load_and_fill(char *name, int *pscaffs)
+{ static DAZZ_DB db;
+  DAZZ_READ *reads;
   FILE      *bases;
+  char      *bases_name;
   char      *seq;
   int        nreads, nscaffs;
   int        i, c;
@@ -192,7 +211,7 @@ HITS_DB *load_and_fill(char *name, int *pscaffs)
   PRC = PRA + db.freq[1];
   PRG = PRC + db.freq[2];
 
-  nreads  = db.nreads;  
+  nreads  = db.nreads;
   reads   = db.reads;
 
   nscaffs = 0;
@@ -214,8 +233,9 @@ HITS_DB *load_and_fill(char *name, int *pscaffs)
   for (i = 0; i < nscaffs; i++)
     ctot += reads[i].coff+1;
 
-  bases = Fopen(Catenate(db.path,"","",".bps"),"r");
-  if (bases == NULL)
+  bases_name = Strdup(Catenate(db.path,"","",".bps"),"Allocating base-pair file name");
+  bases = Fopen(bases_name,"r");
+  if (bases_name == NULL || bases == NULL)
     exit (1);
 
   seq = (char *) Malloc(ctot+4,"Allocating space for genome");
@@ -259,14 +279,10 @@ HITS_DB *load_and_fill(char *name, int *pscaffs)
       len = reads[i].rlen;
       off = reads[i].boff;
       if (ftello(bases) != off)
-        fseeko(bases,off,SEEK_SET);
+        FSEEKO(bases,off,SEEK_SET)
       clen = COMPRESSED_LEN(len);
       if (clen > 0)
-        { if (fread(seq+u,clen,1,bases) != 1)
-            { EPRINTF(EPLACE,"%s: Read of .bps file failed\n",Prog_Name);
-              exit (1);
-            }
-        }
+        FFREAD(seq+u,clen,1,bases)
       Uncompress_Read(len,seq+u);
       if (reads[i].origin == 0)
         reads[c].boff = o;
@@ -295,9 +311,9 @@ HITS_DB *load_and_fill(char *name, int *pscaffs)
 //    output as fasta entries with the PacBio-specific header format that contains the
 //    sampling interval, read length, and a read id.
 
-static void shotgun(HITS_DB *source, int nscaffs)
-{ HITS_READ *reads;
-  int        gleng;
+static void shotgun(DAZZ_DB *source, int nscaffs)
+{ DAZZ_READ *reads;
+  int64      gleng;
   int        maxlen, nreads, qv;
   int64      totlen, totbp;
   char      *rbuffer, *bases;
@@ -323,7 +339,7 @@ static void shotgun(HITS_DB *source, int nscaffs)
   weights = (double *) Malloc(sizeof(double)*(nscaffs+1),"Allocating contig weights");
   if (weights == NULL)
     exit (1);
-  
+
   { double r;
 
     r = 0.;
@@ -393,7 +409,7 @@ static void shotgun(HITS_DB *source, int nscaffs)
           if (x < INS_RATE)
             ins += 1;
           else if (x < IDL_RATE)
-            del += 1; 
+            del += 1;
         }
       sdl -= ins;
       elen = len + (ins-del);
@@ -446,18 +462,18 @@ static void shotgun(HITS_DB *source, int nscaffs)
           rbeg = j;
         }
 
-      printf(">Sim/%d/%d_%d RQ=0.%d\n",nreads+1,0,elen,qv);
+      PRINTF(">Sim/%d/%d_%d RQ=0.%d\n",nreads+1,0,elen,qv)
       if (UPPER)
         Upper_Read(rbuffer);
       else
         Lower_Read(rbuffer);
       for (j = 0; j+WIDTH < elen; j += WIDTH)
-        printf("%.*s\n",WIDTH,rbuffer+j);
+        PRINTF("%.*s\n",WIDTH,rbuffer+j)
       if (j < elen)
-        printf("%s\n",rbuffer+j);
+        PRINTF("%s\n",rbuffer+j)
 
        if (MAP != NULL)
-         fprintf(MAP," %6d %9d %9d\n",scf,rbeg,rend);
+         FPRINTF(MAP," %6d %9d %9d\n",scf,rbeg,rend)
 
        totlen += elen;
        nreads += 1;
@@ -465,7 +481,7 @@ static void shotgun(HITS_DB *source, int nscaffs)
 }
 
 int main(int argc, char *argv[])
-{ HITS_DB *source;
+{ DAZZ_DB *source;
   int      nscaffs;
 
   //  Process command line
@@ -551,6 +567,19 @@ int main(int argc, char *argv[])
       { fprintf(stderr,"Usage: %s %s\n",Prog_Name,Usage[0]);
         fprintf(stderr,"       %*s %s\n",(int) strlen(Prog_Name),"",Usage[1]);
         fprintf(stderr,"       %*s %s\n",(int) strlen(Prog_Name),"",Usage[2]);
+        fprintf(stderr,"\n");
+        fprintf(stderr,"      -m: average read length (log normal distribution).\n");
+        fprintf(stderr,"      -s: standard deviation of read lengths (log normal)\n");
+        fprintf(stderr,"      -x: ignore reads below this length\n");
+        fprintf(stderr,"      -f: forward/reverse strand sampling fraction\n");
+        fprintf(stderr,"      -e: error rate\n");
+        fprintf(stderr,"      -c: coverage of genome\n");
+        fprintf(stderr,"      -C: assume genome is circular (default is linear)\n");
+        fprintf(stderr,"\n");
+        fprintf(stderr,"      -r: Random number generator seed (default is process id).\n");
+        fprintf(stderr,"      -w: Print -w bp per line (default is 80).\n");
+        fprintf(stderr,"      -U: Use upper case for DNA (default is lower case).\n");
+        fprintf(stderr,"      -M: create a map file that indicates where every read was sampled\n");
         exit (1);
       }
   }

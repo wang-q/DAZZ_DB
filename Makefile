@@ -2,8 +2,8 @@ DEST_DIR = ~/bin
 
 CFLAGS = -O3 -Wall -Wextra -Wno-unused-result -fno-strict-aliasing
 
-ALL = fasta2DB DB2fasta quiva2DB DB2quiva DBsplit DBdust Catrack DBshow DBstats DBrm simulator \
-      fasta2DAM DAM2fasta DBdump rangen arrow2DB DB2arrow DBwipe
+ALL = fasta2DB DB2fasta quiva2DB DB2quiva DBsplit DBdust Catrack DBshow DBstats DBrm DBmv \
+      simulator fasta2DAM DAM2fasta DBdump rangen arrow2DB DB2arrow DBwipe DBtrim DBa2b DBb2a
 
 all: $(ALL)
 
@@ -28,6 +28,9 @@ arrow2DB: arrow2DB.c DB.c QV.c DB.h QV.h
 DBsplit: DBsplit.c DB.c DB.h QV.c QV.h
 	gcc $(CFLAGS) -o DBsplit DBsplit.c DB.c QV.c -lm
 
+DBtrim: DBtrim.c DB.c DB.h QV.c QV.h
+	gcc $(CFLAGS) -o DBtrim DBtrim.c DB.c QV.c -lm
+
 DBdust: DBdust.c DB.c DB.h QV.c QV.h
 	gcc $(CFLAGS) -o DBdust DBdust.c DB.c QV.c -lm
 
@@ -46,6 +49,9 @@ DBstats: DBstats.c DB.c DB.h QV.c QV.h
 DBrm: DBrm.c DB.c DB.h QV.c QV.h
 	gcc $(CFLAGS) -o DBrm DBrm.c DB.c QV.c -lm
 
+DBmv: DBmv.c DB.c DB.h QV.c QV.h
+	gcc $(CFLAGS) -o DBmv DBmv.c DB.c QV.c -lm
+
 simulator: simulator.c DB.c DB.h QV.c QV.h
 	gcc $(CFLAGS) -o simulator simulator.c DB.c QV.c -lm
 
@@ -61,6 +67,11 @@ DAM2fasta: DAM2fasta.c DB.c DB.h QV.c QV.h
 DBwipe: DBwipe.c DB.c DB.h QV.c QV.h
 	gcc $(CFLAGS) -o DBwipe DBwipe.c DB.c QV.c -lm
 
+DBa2b: DBa2b.c DB.c DB.h QV.c QV.h
+	gcc $(CFLAGS) -o DBa2b DBa2b.c DB.c QV.c -lm
+
+DBb2a: DBb2a.c DB.c DB.h QV.c QV.h
+	gcc $(CFLAGS) -o DBb2a DBb2a.c DB.c QV.c -lm
 
 clean:
 	rm -f $(ALL)

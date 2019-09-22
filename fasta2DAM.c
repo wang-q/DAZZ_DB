@@ -125,7 +125,7 @@ int main(int argc, char *argv[])
   int    ifiles, ofiles;
   char **flist;
 
-  HITS_DB db;
+  DAZZ_DB db;
   int     ureads;
   int64   offset, hdrset;
 
@@ -186,6 +186,10 @@ int main(int argc, char *argv[])
     if ( (IFILE == NULL && PIPE == NULL && argc <= 2) ||
         ((IFILE != NULL || PIPE != NULL) && argc != 2))
       { fprintf(stderr,"Usage: %s %s\n",Prog_Name,Usage);
+        fprintf(stderr,"\n");
+        fprintf(stderr,"      -f: import files listed 1/line in given file.\n");
+        fprintf(stderr,"      -i: import data from stdin, use optiona name as data source.\n");
+        fprintf(stderr,"        : otherwise, import sequence of specified files.\n");
         exit (1);
       }
   }
@@ -253,7 +257,7 @@ int main(int argc, char *argv[])
         if (bases == NULL || indx == NULL || hdrs == NULL)
           goto error;
 
-        fwrite(&db,sizeof(HITS_DB),1,indx);
+        fwrite(&db,sizeof(DAZZ_DB),1,indx);
 
         ureads  = 0;
         offset  = 0;
@@ -274,7 +278,7 @@ int main(int argc, char *argv[])
         if (bases == NULL || indx == NULL || hdrs == NULL)
           goto error;
 
-        if (fread(&db,sizeof(HITS_DB),1,indx) != 1)
+        if (fread(&db,sizeof(DAZZ_DB),1,indx) != 1)
           { fprintf(stderr,"%s: %s.idx is corrupted, read failed\n",Prog_Name,root);
             goto error;
           }
@@ -314,8 +318,8 @@ int main(int argc, char *argv[])
 
   { int            maxlen;
     int64          totlen, count[4];
-    int            rmax;
-    HITS_READ      prec;
+    int64          rmax;
+    DAZZ_READ      prec;
     char          *read;
     int            append;
     int            c;
@@ -403,8 +407,12 @@ int main(int argc, char *argv[])
         nline = 1;
         eof   = (fgets(read,MAX_NAME,input) == NULL);
         if (eof || strlen(read) < 1)
-          { fprintf(stderr,"Skipping '%s', file is empty!\n",core);
-            fclose(input);
+          { fclose(input);
+            if (PIPE != NULL)
+              { fprintf(stderr,"Standard input is empty, terminating!\n");
+                break;
+              }
+            fprintf(stderr,"Skipping '%s', file is empty!\n",core);
             free(core);
             continue;
           }
@@ -459,7 +467,7 @@ int main(int argc, char *argv[])
                     break;
                   rlen += x;
                   if (rlen + MAX_NAME > rmax)
-                    { rmax = ((int) (1.2 * rmax)) + 1000 + MAX_NAME;
+                    { rmax = ((int64) (1.2 * rmax)) + 1000 + MAX_NAME;
                       read = (char *) realloc(read,rmax+1);
                       if (read == NULL)
                         { fprintf(stderr,"File %s.fasta, Line %d:",core,nline);
@@ -504,7 +512,7 @@ int main(int argc, char *argv[])
                   fwrite(read+pbeg,1,clen,bases);
                   offset += clen;
 
-                  fwrite(&prec,sizeof(HITS_READ),1,indx);
+                  fwrite(&prec,sizeof(DAZZ_READ),1,indx);
                 }
               hdrset += hlen;
             }
@@ -545,7 +553,7 @@ int main(int argc, char *argv[])
     { int64      totlen, dbpos, size;
       int        nblock, ireads, tfirst, rlen;
       int        ufirst, cutoff, allflag;
-      HITS_READ  record;
+      DAZZ_READ  record;
       int        i;
 
       if (VERBOSE)
@@ -587,11 +595,11 @@ int main(int argc, char *argv[])
       //    compute and record partition indices for the rest of the db from this point
       //    forward.
 
-      fseeko(indx,sizeof(HITS_DB)+sizeof(HITS_READ)*ufirst,SEEK_SET);
+      fseeko(indx,sizeof(DAZZ_DB)+sizeof(DAZZ_READ)*ufirst,SEEK_SET);
       totlen = 0;
       ireads = 0;
       for (i = ufirst; i < ureads; i++)
-        { if (fread(&record,sizeof(HITS_READ),1,indx) != 1)
+        { if (fread(&record,sizeof(DAZZ_READ),1,indx) != 1)
             { fprintf(stderr,"%s: %s.idx is corrupted, read failed\n",Prog_Name,root);
               goto error;
             }
@@ -627,7 +635,7 @@ int main(int argc, char *argv[])
   fprintf(ostub,DB_NFILE,ofiles);
 
   rewind(indx);
-  fwrite(&db,sizeof(HITS_DB),1,indx);   //  Write the finalized db record into .idx
+  fwrite(&db,sizeof(DAZZ_DB),1,indx);   //  Write the finalized db record into .idx
 
   if (istub != NULL)
     fclose(istub);
