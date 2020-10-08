@@ -85,6 +85,7 @@ static int qv_map[51] =
 
 int main(int argc, char *argv[])
 { DAZZ_DB    _db, *db = &_db;
+  DAZZ_STUB  *stub;
   int         Quiva_DB, Arrow_DB;
   int         FirstRead;
   FILE       *hdrs      = NULL;
@@ -291,8 +292,6 @@ int main(int argc, char *argv[])
   //  If get prolog and file names and index ranges from the .db or .dam file 
 
   { char *pwd, *root;
-    FILE *dstub;
-    char *dstub_name;
     int   i;
 
     if (DAM)
@@ -303,40 +302,21 @@ int main(int argc, char *argv[])
     if (db->part > 0)
       *rindex(root,'.') = '\0';
     if (DAM)
-      dstub_name = Strdup(Catenate(pwd,"/",root,".dam"),"Allocating dam file name");
+      stub = Read_DB_Stub(Catenate(pwd,"/",root,".dam"),
+                           DB_STUB_NREADS|DB_STUB_FILES|DB_STUB_PROLOGS);
     else
-      dstub_name = Strdup(Catenate(pwd,"/",root,".db"),"Allocating db file name");
-    dstub = Fopen(dstub_name,"r");
-    if (dstub_name == NULL || dstub == NULL)
-      exit (1);
+      stub = Read_DB_Stub(Catenate(pwd,"/",root,".db"),
+                           DB_STUB_NREADS|DB_STUB_FILES|DB_STUB_PROLOGS);
     free(pwd);
     free(root);
 
-    FSCANF(dstub,DB_NFILE,&nfiles)
+    fhead  = stub->prolog;
+    ffile  = stub->fname;
+    findx  = stub->nreads;
+    nfiles = stub->nfiles;
 
-    fhead = (char **) Malloc(sizeof(char *)*nfiles,"Allocating file list");
-    ffile = (char **) Malloc(sizeof(char *)*(nfiles+1),"Allocating file list");
-    findx = (int *) Malloc(sizeof(int *)*(nfiles+1),"Allocating file index");
-    if (fhead == NULL || ffile == NULL || findx == NULL)
-      exit (1);
-
-    findx += 1;
     findx[-1] = 0;
-    ffile += 1;
     ffile[-1] = empty;
-
-    for (i = 0; i < nfiles; i++)
-      { char prolog[MAX_NAME], fname[MAX_NAME];
-
-        FSCANF(dstub,DB_FDATA,findx+i,fname,prolog)
-        if ((fhead[i] = Strdup(prolog,"Adding to file list")) == NULL)
-          exit (1);
-        if ((ffile[i] = Strdup(fname,"Adding to file list")) == NULL)
-          exit (1);
-      }
-
-    free(dstub_name);
-    fclose(dstub);
 
     //  If TRIM (the default) then "trim" prolog ranges and the DB
 
@@ -547,11 +527,11 @@ int main(int argc, char *argv[])
             c += 2;
           }
  
-        if (map > 0 && findx[map-1] <= b+FirstRead && b+FirstRead < findx[map])
+        if (map > 0 && findx[map-1] <= b && b < findx[map])
           ;
         else
           { map = 0;
-            while (b + FirstRead >= findx[map])
+            while (b >= findx[map])
               map += 1;
             map -= 1;
           }
@@ -566,7 +546,7 @@ int main(int argc, char *argv[])
 
             noreads += 1;
 
-            if (DOFLN && i+FirstRead >= findx[map])
+            if (DOFLN && i >= findx[map])
               { int ten;
 
                 if (strcmp(ffile[map+1],ffile[last]) != 0)
@@ -595,7 +575,7 @@ int main(int argc, char *argv[])
                       hdrmax = ten;
                     hdrtot += ten;
                   }
-                else if (i+FirstRead >= findx[map])
+                else if (i >= findx[map])
                   { map += 1;
                     ten = strlen(fhead[map]);
 
@@ -713,11 +693,11 @@ int main(int argc, char *argv[])
             c += 2;
           }
 
-        if (map > 0 && findx[map-1] <= b+FirstRead && b+FirstRead < findx[map])
+        if (map > 0 && findx[map-1] <= b && b < findx[map])
           ;
         else
           { map = 0;
-            while (b + FirstRead >= findx[map])
+            while (b >= findx[map])
               map += 1;
             map -= 1;
           }
@@ -736,7 +716,7 @@ int main(int argc, char *argv[])
             flags = r->flags;
             qv    = (flags & DB_QV);
 
-            if (DOFLN && i+FirstRead >= findx[map])
+            if (DOFLN && i >= findx[map])
               { if (strcmp(ffile[map+1],ffile[last]) != 0)
                   { PRINTF("F %ld %s\n",strlen(ffile[map+1]),ffile[map+1])
                     last = map+1;
@@ -756,7 +736,7 @@ int main(int argc, char *argv[])
                     PRINTF("L %d %d %d\n",r->origin,r->fpulse,r->fpulse+len)
                   }
                 else
-                  { if (i+FirstRead >= findx[map])
+                  { if (i >= findx[map])
                       { map += 1;
                         PRINTF("H %ld %s\n",strlen(fhead[map]),fhead[map])
                       }
@@ -854,16 +834,7 @@ int main(int argc, char *argv[])
   if (DAM)
     fclose(hdrs);
   else
-    { int i;
-
-      for (i = 0; i < nfiles; i++)
-        { free(fhead[i]);
-          free(ffile[i]);
-        }
-      free(fhead);
-      free(ffile-1);
-      free(findx-1);
-    }
+    Free_DB_Stub(stub);
   Close_DB(db);
 
   exit (0);

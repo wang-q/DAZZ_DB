@@ -65,45 +65,34 @@ int main(int argc, char *argv[])
 
   //  Open DB stub and get number of blocks
 
-  { char *pwd, *root;
-    int   i, plen, index, isdam;
-    FILE *dstub;
-    char *dstub_name;
+  { char      *pwd, *root;
+    int        plen;
+    DAZZ_STUB *stub;
 
     plen = strlen(argv[1]);
-    if (strcmp(argv[1]+(plen-3),".dam") == 0)
-      root = Root(argv[1],".dam");
+    pwd  = PathTo(argv[1]);
+    if (strcmp(argv[1]+(plen-4),".dam") == 0)
+      { root = Root(argv[1],".dam");
+        stub = Read_DB_Stub(Catenate(pwd,"/",root,".dam"),0);
+      }
     else
-      root = Root(argv[1],".db");
-    pwd = PathTo(argv[1]);
-    prefix = Strdup(Catenate(pwd,PATHSEP,root,"."),"Allocating track name");
-
-    dstub = fopen(Catenate(pwd,"/",root,".db"),"r");
-    isdam = 0;
-    if (dstub == NULL)
-      { dstub = fopen(Catenate(pwd,"/",root,".dam"),"r");
-        isdam = 1;
-        if (dstub == NULL)
-          { fprintf(stderr,"%s: Cannot find %s either as a .db or a .dam\n",Prog_Name,root);
-            exit (1);
+      { root = Root(argv[1],".db");
+        stub = Read_DB_Stub(Catenate(pwd,"/",root,".db"),0);
+        if (stub == NULL)
+          { stub = Read_DB_Stub(Catenate(pwd,"/",root,".dam"),0);
+            if (stub == NULL)
+              { fprintf(stderr,"%s: Cannot open %s as either a DB or a DAM\n",Prog_Name,argv[1]);
+                exit (1);
+              }
           }
       }
-    dstub_name = Strdup(Catenate(pwd,"/",root,isdam?".dam":".db"),"Allocating db file name");
-    if (dstub_name == NULL)
-      exit (1);
-    
-    FSCANF(dstub,DB_NFILE,&nblocks)
-    
-    for (i = 0; i < nblocks; i++)
-      { char prolog[MAX_NAME], fname[MAX_NAME];
-        
-        FSCANF(dstub,DB_FDATA,&index,fname,prolog)
-      }
-    
-    FSCANF(dstub,DB_NBLOCK,&nblocks)
 
-    fclose(dstub);
-    free(dstub_name);
+    nblocks = stub->nblocks;
+
+    Free_DB_Stub(stub);
+
+    prefix = Strdup(Catenate(pwd,PATHSEP,root,"."),"Allocating track name");
+
     free(pwd);
     free(root);
   }
@@ -175,14 +164,16 @@ int main(int argc, char *argv[])
                               "Allocating .data file name");
           if (afile_name == NULL || dfile_name == NULL)
             goto error;
-            
   
           afile = fopen(afile_name,"r");
           if (afile == NULL)
-            break;
-          dfile = fopen(Numbered_Suffix(prefix,nfiles+1,Catenate(".",argv[c],".","data")),"r");
+            { free(afile_name);
+              free(dfile_name);
+              break;
+            }
+          dfile = fopen(dfile_name,"r");
           if (dfile == NULL && errno != ENOENT)
-            { fprintf(stderr,"%s: The file %s is corrupted\n",Prog_Name,dfile_name);
+            { fprintf(stderr,"%s: Cannot find/open data file %s\n",Prog_Name,dfile_name);
               goto error;
             }
   
@@ -194,14 +185,13 @@ int main(int argc, char *argv[])
             { fprintf(stderr,"  Concatenating %s%d.%s ...\n",prefix,nfiles+1,argv[c]);
               fflush(stderr);
             }
-    
+
           FFREAD(&tracklen,sizeof(int),1,afile)
           FFREAD(&size,sizeof(int),1,afile)
           if (size == 0)
             esize = 8;
           else
             esize = size;
-  
           if (nfiles == 0)
             { tracksiz = size;
               if (dfile != NULL)
@@ -325,6 +315,8 @@ int main(int argc, char *argv[])
           nfiles   += 1;
           if (dfile != NULL)
             fclose(dfile);
+          free(dfile_name);
+          free(afile_name);
         }
 
       if (nfiles == 0)
@@ -363,10 +355,8 @@ int main(int argc, char *argv[])
         }
 
       if (nfiles != nblocks)
-        { fprintf(stderr,"%s: Did not catenate all tracks of DB (nfiles %d != nblocks %d)\n",
-	                 Prog_Name, nfiles, nblocks);
-          goto error;
-        }
+        fprintf(stderr,"%s: Warning: Did not catenate all tracks of DB (nfiles %d != nblocks %d)\n",
+                       Prog_Name,nfiles,nblocks);
   
       FCLOSE(aout);
       if (dout != NULL)
@@ -376,7 +366,7 @@ int main(int argc, char *argv[])
         { int   i;
           char *name;
 
-          for (i = 1; i <= nblocks ;i++)
+          for (i = 1; i <= nfiles ;i++)
             { name = Numbered_Suffix(prefix,i,Catenate(".",argv[c],".","anno"));
               if (unlink(name) != 0)
                 fprintf(stderr,"%s: [WARNING] Couldn't delete file %s\n",Prog_Name,name);
